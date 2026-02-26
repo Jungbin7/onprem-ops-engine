@@ -1,0 +1,33 @@
+# E-Commerce Resilience Platform — Python Dependencies
+#
+# [버전 고정 이유]
+#   - 재현 가능한 빌드 보장. "works on my machine" 방지
+#   - Dependabot / Renovate 같은 자동 업데이트 봇과 호환
+
+# Web Framework
+# [FastAPI 선택 이유] 비동기 I/O + Pydantic 자동 검증 + /docs 자동 생성
+# Django 대비: 동기 전용 ORM 불필요. Flask 대비: 타입 안전성 확보
+fastapi==0.109.2
+uvicorn==0.27.1
+
+# Database
+# [psycopg2-binary 이유] C 확장 기반 PostgreSQL 드라이버. 순수 Python 대비 성능 3~5배
+psycopg2-binary==2.9.9
+
+# Cache
+# [Redis 선택 이유] Pub/Sub + Sorted Set + HA 지원. Memcached 대비 데이터 구조 풍부
+redis==5.0.1
+
+# HTTP Client (Neo4j HTTP API, Ollama API 호출용)
+httpx==0.26.0
+
+# Data Validation
+pydantic==2.5.3
+
+# ===========================================================================
+# [prometheus_client 추가 이유]
+#   - FastAPI 앱 내부 메트릭을 Prometheus가 scrape할 수 있도록 /metrics 노출
+#   - 수동 로그 파싱 방식 대비: 실시간 타임시리즈, alerting 연동 가능
+#   - Grafana 대시보드의 모든 패널이 이 라이브러리 기반 메트릭에 의존
+# ===========================================================================
+prometheus-client==0.20.0

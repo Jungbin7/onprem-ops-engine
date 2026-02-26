@@ -1,0 +1,33 @@
+# =============================================================================
+# Grafana Provisioning — Dashboard 자동 Import 설정
+# =============================================================================
+# [이 파일의 역할]
+#   - Grafana에게 "이 디렉토리의 JSON 파일들을 대시보드로 자동 로드하라"고 지시
+#   - setup-monitoring.sh API 방식과 상호 보완 (API = 일회성, provisioning = 영속)
+#   - 이 파일 위치: /etc/grafana/provisioning/dashboards/dashboard.yaml
+#
+# [API import vs Provisioning 비교]
+#   API import: curl 한 번 → Grafana DB에 저장 (재시작에도 유지)
+#   Provisioning: JSON 파일이 있는 한 재시작해도 자동 복구 → GitOps 친화적
+# =============================================================================
+
+apiVersion: 1
+
+providers:
+  - name: "E-Commerce Dashboards"
+    # [orgId: 1 이유]
+    #   - Grafana 기본 조직(default org). 다중 테넌트 미사용 시 항상 1
+    orgId: 1
+    type: file
+    disableDeletion: false   # dashboard.json 삭제 시 Grafana에서도 삭제
+    # [updateIntervalSeconds: 30 이유]
+    #   - 30초마다 JSON 파일 변경 감지 → 수동 reload 없이 대시보드 업데이트
+    updateIntervalSeconds: 30
+    allowUiUpdates: true     # UI에서 수정 후 저장 허용 (false면 read-only)
+    options:
+      # 이 경로의 모든 .json 파일을 대시보드로 자동 로드
+      path: /etc/grafana/dashboards
+      # [foldersFromFilesStructure: true 이유]
+      #   - 하위 디렉토리 구조 → Grafana 폴더 구조로 자동 매핑
+      #   - dashboards/prod/*.json → "prod" 폴더, dashboards/dev/*.json → "dev" 폴더
+      foldersFromFilesStructure: true

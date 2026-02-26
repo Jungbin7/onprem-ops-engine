@@ -1,0 +1,24 @@
+---
+# =============================================================================
+# Flux CD — GitRepository Source Definition
+# =============================================================================
+# Flux가 감시할 Git 레포지토리를 정의한다.
+# [GitRepository CRD 선택 이유]
+#   - Flux의 Source 컨트롤러가 이 리소스를 watching
+#   - interval마다 Git pull → 변경 감지 시 Kustomization/HelmRelease 자동 적용
+# =============================================================================
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: onprem-ops-engine
+  namespace: flux-system
+spec:
+  interval: 1m0s          # 1분마다 Git 변경 확인
+  ref:
+    branch: main          # main 브랜치 추적
+  url: https://github.com/Jungbin7/onprem-ops-engine  # TODO: 실제 URL로 변경
+  # [secretRef 이유]
+  #   - GitHub 프라이빗 레포의 경우 PAT 토큰을 k8s Secret으로 관리
+  #   - 퍼블릭 레포는 secretRef 불필요
+  # secretRef:
+  #   name: flux-github-token

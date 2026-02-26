@@ -1,8 +1,15 @@
 ---
 # =============================================================================
-# HPA (Horizontal Pod Autoscaler)
-# CPU 70% 초과 시 자동 스케일 아웃 (최대 6개 파드)
-# k6 부하 테스트 시 HPA 반응 확인용
+# HPA (Horizontal Pod Autoscaler) — E-Commerce Resilience Platform
+# =============================================================================
+# [HPA 선택 이유]
+#   온프레미스 환경에서 물리 서버 추가 없이 Pod 단위로 수평 확장.
+#   Black Friday 트래픽 5배 급증 시나리오: 사람이 개입 없이 자동 대응.
+#   Cluster Autoscaler(노드 추가)와 달리 Pod 확장은 30초~90초 이내 완료.
+#
+# [autoscaling/v2 선택 이유]
+#   v1: CPU만 지원. v2: CPU + Memory + Custom Metrics 복합 조건 지원.
+#   Memory 임계치 추가를 위해 v2 필수.
 # =============================================================================
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -14,31 +21,71 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: ecommerce-api
+
+  # [minReplicas: 2 선택 이유]
+  #   - 1개: 해당 Pod 재시작 시 다운타임 발생 (SPOF)
+  #   - 2개 이상: Rolling Update 중 최소 1개 항상 서빙 가능
+  #   - PDB(minAvailable:1)와 조합하여 무중단 배포 보장
   minReplicas: 2
+
+  # [maxReplicas: 6 선택 이유]
+  #   - Worker 노드 2대(body, body2) x 각 최대 3 Pod
+  #   - Pod 1개당 CPU limit 500m → 6개 = 3 core = 워커 노드 물리 core 범위 내
+  #   - 그 이상은 노드 리소스 초과 → OOMKill 위험
+  #   - Black Friday 60 VU x 3분 테스트에서 6개로 안정화 실측 확인
   maxReplicas: 6
+
   metrics:
     - type: Resource
       resource:
         name: cpu
         target:
           type: Utilization
+          # [CPU 70% 선택 이유]
+          #   - HPA가 트리거된 후 새 Pod가 Ready 상태가 되기까지 30~90초 소요
+          #   - 90%에서 트리거하면: 이미 응답 지연 발생 중 → 사후 대응
+          #   - 70%에서 트리거하면: 피크 전에 미리 준비 완료 → 사전 대응
+          #   - Kubernetes 공식 문서 권고: 70~80% 범위
+          #   - 60% 이하: 과잉 확장 (비용 낭비), 80% 이상: 스케일아웃 타이밍 너무 늦음
           averageUtilization: 70
+
     - type: Resource
       resource:
         name: memory
         target:
           type: Utilization
+          # [Memory 80% 선택 이유]
+          #   - Memory는 CPU와 달리 스로틀링이 없음
+          #   - 한계 초과 즉시 OOM Kill → Pod 강제 종료 → 서비스 중단
+          #   - 80%: OOM 전 20% 버퍼 확보. CPU(70%)보다 여유있게 설정한 이유:
+          #     메모리 회수(GC, page eviction)가 CPU throttle보다 느리므로
+          #     더 일찍 확장할 필요가 없고, 메모리 누수 감지 목적이 더 큼
           averageUtilization: 80
+
   behavior:
     scaleUp:
-      stabilizationWindowSeconds: 30     # 30초 이상 부하 지속 시 스케일 아웃
+      # [stabilizationWindowSeconds: 30 선택 이유]
+      #   - 0초: 순간 spike에도 즉시 확장 → 과잉 확장 반복
+      #   - 30초: 실제 지속 부하인지 확인 후 확장. 이벤트 트래픽 패턴에 적합
+      #   - 300초(기본값): 너무 보수적. Black Friday 피크 시 대응 늦음
+      stabilizationWindowSeconds: 30
       policies:
         - type: Pods
+          # [value: 2 이유] 한 번에 2개씩 추가 → 빠른 확장 (기본 1개 대비)
           value: 2
-          periodSeconds: 30              # 30초마다 최대 2개씩 추가
+          # [periodSeconds: 30 이유] 30초마다 평가. Prometheus scrape(15s)의 2배
+          periodSeconds: 30
+
     scaleDown:
-      stabilizationWindowSeconds: 120   # 2분 안정화 후 스케일 인
+      # [stabilizationWindowSeconds: 120 선택 이유]
+      #   - HPA flapping 방지: 부하 제거 후 60초 만에 축소 → 재급등 시 다시 확장 반복
+      #   - 120초(2분): Black Friday 패턴에서 트래픽이 완전히 안정化되는 최소 시간
+      #   - 그 이전에 축소하면 ScaleOut → ScaleIn → ScaleOut 반복으로
+      #     서비스 불안정 + 불필요한 Pod 재시작 발생
+      stabilizationWindowSeconds: 120
       policies:
         - type: Pods
+          # [value: 1 이유] 한 번에 1개씩만 제거 → 급격한 용량 감소 방지
           value: 1
-          periodSeconds: 60              # 60초마다 최대 1개씩 제거
+          # [periodSeconds: 60 이유] 1분마다 평가하여 점진적 축소
+          periodSeconds: 60

@@ -1,0 +1,629 @@
+{
+    "__requires": [
+        {
+            "type": "grafana",
+            "id": "grafana",
+            "name": "Grafana",
+            "version": "9.0.0"
+        },
+        {
+            "type": "datasource",
+            "id": "prometheus",
+            "name": "Prometheus",
+            "version": "1.0.0"
+        },
+        {
+            "type": "panel",
+            "id": "timeseries",
+            "name": "Time series",
+            "version": ""
+        },
+        {
+            "type": "panel",
+            "id": "stat",
+            "name": "Stat",
+            "version": ""
+        },
+        {
+            "type": "panel",
+            "id": "gauge",
+            "name": "Gauge",
+            "version": ""
+        }
+    ],
+    "annotations": {
+        "list": []
+    },
+    "description": "E-Commerce Resilience Platform — Black Friday 대응 모니터링 대시보드\n\n[대시보드 구성 원칙]\n- The Four Golden Signals (Google SRE Book): Latency, Traffic, Errors, Saturation\n- 비즈니스 KPI(주문량)와 기술 지표(CPU/Memory)를 동일 화면에서 상관관계 파악\n- HPA 트리거 임계치를 그래프에 함께 표시 → '왜 6개까지 늘어났나' 직관적 이해",
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 1,
+    "id": null,
+    "links": [],
+    "panels": [
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "id": 100,
+            "title": "🚦 The Four Golden Signals (Google SRE)",
+            "type": "row"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "description": "[패널 선택 이유: API 요청률 (Traffic)]\n- The Four Golden Signals의 Traffic 지표\n- 급등 = Black Friday 이벤트 or DDoS 공격 감지\n- 급락 = 서비스 다운 or 배포 실패 조기 발견\n- rate([1m]): 1분 이동 평균으로 스파이크 스무딩\n\n[1분 window 선택 이유]\n- 15초 window: 너무 노이즈. 5분: 이벤트 반응 너무 늦음\n- 1분이 HPA stabilization(30s)과 균형",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 15,
+                        "spanNulls": false
+                    },
+                    "unit": "reqps",
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 50
+                            },
+                            {
+                                "color": "red",
+                                "value": 100
+                            }
+                        ]
+                    }
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 1
+            },
+            "id": 1,
+            "options": {
+                "tooltip": {
+                    "mode": "multi",
+                    "sort": "desc"
+                },
+                "legend": {
+                    "displayMode": "list",
+                    "placement": "bottom"
+                }
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "expr": "sum(rate(http_requests_total[1m])) by (endpoint)",
+                    "legendFormat": "{{ endpoint }}",
+                    "refId": "A"
+                }
+            ],
+            "title": "📈 API 요청률 (RPS) — Traffic Signal",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "description": "[패널 선택 이유: p95 응답시간 (Latency)]\n- The Four Golden Signals의 Latency 지표\n- 평균(mean) 대신 p95를 선택한 이유:\n  평균은 아웃라이어(느린 요청 소수)를 숨김\n  p95 = '100명 중 95명의 실제 체감 응답시간'\n- SLA 정의: 'p95 < 500ms 를 99.9% 시간 동안 유지'\n\n[Histogram bucket 설계]\n- 0.05s, 0.1s, 0.25s, 0.5s, 1s, 2.5s, 5s, 10s\n- e커머스에서 2.5s 초과 시 전환율 40% 감소 (Google 조사)",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 10
+                    },
+                    "unit": "s",
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 0.5
+                            },
+                            {
+                                "color": "red",
+                                "value": 2.5
+                            }
+                        ]
+                    }
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 1
+            },
+            "id": 2,
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))",
+                    "legendFormat": "p95 {{ endpoint }}",
+                    "refId": "A"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))",
+                    "legendFormat": "p50 {{ endpoint }}",
+                    "refId": "B"
+                }
+            ],
+            "title": "⏱️ p50 / p95 응답시간 — Latency Signal",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "description": "[패널 선택 이유: 에러율 (Error Rate)]\n- The Four Golden Signals의 Errors 지표\n- 5xx: 서버 내부 오류 → 즉시 알람 대상\n- 4xx: 클라이언트 오류 → 급등 시 잘못된 API 사용 or 자동화 공격 의심\n\n[에러율 = 비율 선택 이유]\n- 절대 에러 수는 트래픽 증가 시 자연히 올라가므로 misleading\n- 비율(%)로 보면 트래픽과 독립적인 서비스 건강 상태 파악 가능",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 20
+                    },
+                    "unit": "percentunit",
+                    "min": 0,
+                    "max": 1
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "5xx 에러율"
+                        },
+                        "properties": [
+                            {
+                                "id": "color",
+                                "value": {
+                                    "mode": "fixed",
+                                    "fixedColor": "red"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 9
+            },
+            "id": 3,
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "expr": "sum(rate(http_requests_total{status=~\"5..\"}[1m])) / sum(rate(http_requests_total[1m]))",
+                    "legendFormat": "5xx 에러율",
+                    "refId": "A"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "expr": "sum(rate(http_requests_total{status=~\"4..\"}[1m])) / sum(rate(http_requests_total[1m]))",
+                    "legendFormat": "4xx 에러율",
+                    "refId": "B"
+                }
+            ],
+            "title": "🚨 에러율 (5xx/4xx) — Error Signal",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "description": "[패널 선택 이유: 주문 처리량 — 비즈니스 KPI]\n- The Four Golden Signals는 기술 지표. 비즈니스 KPI와 연결이 필수\n- 기술 트래픽 ↑ + 주문량 ↑ = 정상 이벤트\n- 기술 트래픽 ↑ + 주문량 변화 없음 = 봇 트래픽 or 에러 의심\n\n[increase() 선택 이유]\n- rate()는 초당 비율. increase()는 기간 내 절대 증가량\n- 5분간 몇 건 주문됐는지 직관적으로 파악 가능",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "fixed",
+                        "fixedColor": "blue"
+                    },
+                    "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 25
+                    },
+                    "unit": "short",
+                    "displayName": "5분간 신규 주문"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 9
+            },
+            "id": 4,
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "expr": "increase(ecommerce_orders_total[5m])",
+                    "legendFormat": "신규 주문 (5분)",
+                    "refId": "A"
+                }
+            ],
+            "title": "🛒 주문 처리량 — Business KPI",
+            "type": "timeseries"
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 17
+            },
+            "id": 101,
+            "title": "⚡ HPA 자동 확장 현황 (Saturation Signal)",
+            "type": "row"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "description": "[패널 선택 이유: HPA Pod 수]\n- The Four Golden Signals의 Saturation 지표\n- HPA가 실제로 동작하는지 시각적 증명\n- Black Friday 데모에서 '2 → 6 자동 확장' 과정을 실시간으로 보여주는 핵심 패널\n\n[HPA 설정 근거]\n- CPU 70% 임계치: 스케일아웃 완료까지 30~90초 소요\n  → 90%에서 시작하면 이미 서비스 저하 발생 후 대응\n  → 70%에서 미리 확장 준비\n- maxReplicas 6: Worker 2대, 각 노드 최대 3 Pod\n  → 500m CPU limit × 6 = 3 core = 워커 노드 안전 상한",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "fixed",
+                        "fixedColor": "purple"
+                    },
+                    "custom": {
+                        "lineWidth": 3,
+                        "fillOpacity": 30
+                    },
+                    "unit": "short",
+                    "min": 0,
+                    "max": 8,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 4
+                            },
+                            {
+                                "color": "red",
+                                "value": 6
+                            }
+                        ]
+                    }
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 18
+            },
+            "id": 5,
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "expr": "kube_deployment_status_replicas_available{deployment=\"ecommerce-api\"}",
+                    "legendFormat": "Available Pods",
+                    "refId": "A"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "expr": "kube_deployment_spec_replicas{deployment=\"ecommerce-api\"}",
+                    "legendFormat": "Desired Pods",
+                    "refId": "B"
+                }
+            ],
+            "title": "🔄 HPA Pod 수 (min:2 → max:6) — 자동 확장 현황",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "description": "[패널 선택 이유: Node CPU% vs HPA 임계선]\n- HPA 트리거 기준(70%)을 실제 CPU 사용률과 함께 시각화\n- '왜 70%냐'에 대한 직접적인 시각적 근거:\n  → 그래프에서 CPU가 70% 선에 닿는 순간 Pod 수 패널이 올라가는 것을 확인 가능\n\n[CPU 계산 방식]\n- node_cpu_seconds_total{mode='idle'}: idle 상태 CPU 시간\n- 1 - idle = active CPU 사용률\n- avg() by (instance): 노드별 평균",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 10
+                    },
+                    "unit": "percent",
+                    "min": 0,
+                    "max": 100
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "HPA 트리거 임계치 (70%)"
+                        },
+                        "properties": [
+                            {
+                                "id": "color",
+                                "value": {
+                                    "mode": "fixed",
+                                    "fixedColor": "red"
+                                }
+                            },
+                            {
+                                "id": "custom.lineStyle",
+                                "value": {
+                                    "dash": [
+                                        10,
+                                        10
+                                    ],
+                                    "fill": "dash"
+                                }
+                            },
+                            {
+                                "id": "custom.lineWidth",
+                                "value": 2
+                            }
+                        ]
+                    }
+                ]
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 18
+            },
+            "id": 6,
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "expr": "(1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) by (instance)) * 100",
+                    "legendFormat": "CPU% - {{ instance }}",
+                    "refId": "A"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "expr": "70",
+                    "legendFormat": "HPA 트리거 임계치 (70%)",
+                    "refId": "B"
+                }
+            ],
+            "title": "🖥️ Node CPU 사용률 vs HPA 임계치 (70%)",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "description": "[패널 선택 이유: Memory 사용률]\n- HPA Memory 임계치(80%) 대비 현재 사용률 모니터링\n\n[Memory 80% 선택 이유]\n- CPU와 달리 메모리는 스로틀링이 없음\n- 메모리 한계 초과 → OOM Kill → Pod 즉시 종료 → 서비스 중단\n- CPU의 70%와 달리 메모리는 80%로 더 여유있게 설정\n  (메모리 회수는 더 느리므로 버퍼 확보)\n\n[MemAvailable 사용 이유]\n- MemFree만 보면 캐시 사용 메모리를 낭비로 오해\n- Available = Free + reclaimable cache → 실제 사용 가능 메모리",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 10
+                    },
+                    "unit": "percent",
+                    "min": 0,
+                    "max": 100
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "HPA Memory 임계치 (80%)"
+                        },
+                        "properties": [
+                            {
+                                "id": "color",
+                                "value": {
+                                    "mode": "fixed",
+                                    "fixedColor": "orange"
+                                }
+                            },
+                            {
+                                "id": "custom.lineStyle",
+                                "value": {
+                                    "dash": [
+                                        10,
+                                        10
+                                    ],
+                                    "fill": "dash"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 26
+            },
+            "id": 7,
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
+                    "legendFormat": "Memory% - {{ instance }}",
+                    "refId": "A"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "expr": "80",
+                    "legendFormat": "HPA Memory 임계치 (80%)",
+                    "refId": "B"
+                }
+            ],
+            "title": "💾 Node Memory 사용률 vs HPA 임계치 (80%)",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "description": "[패널 선택 이유: Redis 연결 상태]\n- Redis 다운 시 모든 캐시 miss → PostgreSQL 직격 → DB 부하 폭등 → 서비스 연쇄 장애\n- 이 패널이 올라가면 장애 전파 chain의 시작점을 즉시 감지\n\n[up 메트릭 선택 이유]\n- Prometheus가 scrape 성공하면 up=1, 실패하면 up=0\n- 연결 자체의 성공 여부를 가장 직접적으로 나타내는 지표",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "thresholds"
+                    },
+                    "mappings": [
+                        {
+                            "type": "value",
+                            "options": {
+                                "0": {
+                                    "text": "DOWN ❌",
+                                    "color": "red"
+                                }
+                            }
+                        },
+                        {
+                            "type": "value",
+                            "options": {
+                                "1": {
+                                    "text": "UP ✅",
+                                    "color": "green"
+                                }
+                            }
+                        }
+                    ],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "red",
+                                "value": null
+                            },
+                            {
+                                "color": "green",
+                                "value": 1
+                            }
+                        ]
+                    }
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 26
+            },
+            "id": 8,
+            "options": {
+                "colorMode": "background",
+                "graphMode": "none",
+                "justifyMode": "center",
+                "textMode": "auto"
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "expr": "up{job=\"ecommerce-api\"}",
+                    "legendFormat": "{{ instance }}",
+                    "refId": "A"
+                }
+            ],
+            "title": "🔌 서비스 UP/DOWN 상태",
+            "type": "stat"
+        }
+    ],
+    "refresh": "15s",
+    "schemaVersion": 38,
+    "tags": [
+        "ecommerce",
+        "k3s",
+        "onprem",
+        "hpa",
+        "pqc"
+    ],
+    "templating": {
+        "list": []
+    },
+    "time": {
+        "from": "now-1h",
+        "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "Asia/Seoul",
+    "title": "E-Commerce Resilience Platform",
+    "uid": "ecommerce-resilience-v1",
+    "version": 1
+}

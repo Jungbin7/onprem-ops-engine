@@ -1,0 +1,37 @@
+---
+# =============================================================================
+# Flux CD — Cluster-level Kustomization
+# =============================================================================
+# [Flux CD 선택 이유]
+#   - 팀 프로젝트에서 ArgoCD 사용 → 동일 GitOps 패러다임(Pull 방식)이지만
+#     Flux는 Git 네이티브 설계, CRD 기반, Helm/Kustomize 모두 지원
+#   - CNCF Graduated 프로젝트 (ArgoCD도 Graduated) → 엔터프라이즈 안정성
+#   - Notification, Image Automation 컨트롤러로 자동 이미지 업데이트 가능
+#
+# [GitOps Pull 방식 선택 이유]
+#   - Push(CI가 직접 kubectl apply): CI가 클러스터 접근 자격증명 보유 → 보안 위험
+#   - Pull(Flux가 Git 감시): 클러스터가 Git 레포를 pull → 자격증명 노출 없음
+# =============================================================================
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps
+  namespace: flux-system
+spec:
+  interval: 5m0s          # 5분마다 Git과 클러스터 상태 동기화
+  path: ./flux/apps       # 이 경로의 모든 manifest 적용
+  prune: true             # Git에서 삭제된 리소스 클러스터에서도 자동 삭제
+  sourceRef:
+    kind: GitRepository
+    name: onprem-ops-engine  # flux/sources/gitrepository.yaml에서 정의
+  # [healthChecks 이유]
+  #   - 동기화 완료 ≠ 애플리케이션 정상 동작
+  #   - Deployment readiness 확인 후 다음 단계 진행 (의존 관계 보호)
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: ecommerce-api
+      namespace: default
+  # [timeout 이유]
+  #   - 이미지 pull 등으로 5분 이상 걸릴 경우 무한 대기 방지
+  timeout: 5m0s

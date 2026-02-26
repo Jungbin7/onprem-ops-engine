@@ -1,0 +1,40 @@
+# =============================================================================
+# Grafana Provisioning — Prometheus 데이터소스 자동 설정
+# =============================================================================
+# [Provisioning 방식 선택 이유]
+#   - Grafana UI 수동 클릭 → 재현 불가, IaC 원칙 위반
+#   - YAML 파일 기반 provisioning → Grafana 시작 시 자동 적용
+#   - setup-monitoring.sh의 API 방식 대비: 서버 재시작에도 영속적으로 유지
+#
+# 이 파일 위치: /etc/grafana/provisioning/datasources/prometheus.yaml
+# (Ansible playbook 또는 setup-monitoring.sh로 배포)
+# =============================================================================
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    # [access: proxy 이유]
+    #   - Grafana 서버가 Prometheus에 요청 (브라우저가 직접 요청 X)
+    #   - Prometheus가 내부망(localhost)에 있어도 Grafana가 프록시
+    access: proxy
+    url: http://localhost:9090
+    isDefault: true
+    editable: false    # UI에서 실수로 수정 방지
+
+    jsonData:
+      # [timeInterval: 15s 이유]
+      #   - Prometheus scrape_interval과 동일하게 설정
+      #   - Grafana 패널의 최소 해상도가 scrape 주기와 일치해야 빈 데이터 없음
+      timeInterval: "15s"
+      # [httpMethod: POST 이유]
+      #   - 긴 PromQL 쿼리는 GET URL 길이 제한 초과 가능
+      #   - POST로 쿼리 본문 전송 → 복잡한 메트릭 집계 쿼리 안전 처리
+      httpMethod: POST
+      # [exemplarTraceIdDestinations 이유]
+      #   - Prometheus Exemplar + 미래 Jaeger/Tempo 연동 시 trace 클릭스루
+      #   - 현재 비활성화, 분산 추적 도입 시 활성화
+      # exemplarTraceIdDestinations:
+      #   - name: traceID
+      #     datasourceUid: tempo_uid

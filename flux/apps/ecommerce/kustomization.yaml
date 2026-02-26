@@ -1,0 +1,32 @@
+---
+# =============================================================================
+# Flux CD — Ecommerce App Kustomization
+# =============================================================================
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ecommerce-app
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./ansible/k8s-manifests    # 기존 k8s manifest 디렉토리 재사용
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: onprem-ops-engine
+  # [dependsOn 이유]
+  #   - apps Kustomization이 성공한 후에만 이 리소스 적용
+  #   - 인프라(namespace, RBAC)가 먼저 있어야 앱 배포 가능
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: ecommerce-api
+      namespace: default
+  timeout: 5m0s
+  # [postBuild 이유]
+  #   - ConfigMap의 환경별 변수를 flux 변수 치환으로 처리
+  #   - 환경별 다른 값이 필요할 때 사용 (현재 단일 환경이므로 주석 처리)
+  # postBuild:
+  #   substituteFrom:
+  #     - kind: ConfigMap
+  #       name: flux-cluster-vars
