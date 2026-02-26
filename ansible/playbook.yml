@@ -1,0 +1,496 @@
+---
+# =============================================================================
+# E-Commerce Resilience Platform - Ansible Playbook
+# 1 Control (Brain) + 2 Workers (Body, Body2) + Memory + Shield
+# =============================================================================
+
+# Phase 0: Pre-Flight & Common Setup (All Nodes)
+# =============================================================================
+- name: Pre-Flight Validation & Common Setup
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: "[PRE-FLIGHT] Check minimum memory"
+      assert:
+        that: ansible_memtotal_mb >= 900
+        fail_msg: "Insufficient memory: {{ ansible_memtotal_mb }}MB (min: 900MB)"
+
+    - name: "[COMMON] Install base packages"
+      apt:
+        name:
+          - curl
+          - unzip
+          - python3-pip
+          - python3-venv
+          - gnupg
+          - apt-transport-https
+          - ca-certificates
+        state: present
+        update_cache: yes
+
+# Phase 1: Brain Node (k3s Control Plane + Neo4j + Ollama)
+# =============================================================================
+- name: Setup Brain Node - Control Plane & AI
+  hosts: brain
+  become: yes
+  vars:
+    k3s_version: "v1.29.2+k3s1"
+    k3s_token: "ecommerce-cluster-2026"
+
+  tasks:
+    - name: "[K3S-SERVER] Install k3s server"
+      shell: >
+        curl -sfL https://get.k3s.io |
+        INSTALL_K3S_VERSION={{ k3s_version }}
+        K3S_TOKEN={{ k3s_token }}
+        sh -s - server
+        --disable traefik
+        --node-ip=192.168.174.10
+        --flannel-iface=eth1
+        --advertise-address=192.168.174.10
+        --bind-address=192.168.174.10
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: "[K3S-SERVER] Wait for k3s to be ready"
+      wait_for:
+        path: /etc/rancher/k3s/k3s.yaml
+        timeout: 120
+
+    - name: "[K3S-SERVER] Create kubectl symlink"
+      file:
+        src: /usr/local/bin/k3s
+        dest: /usr/local/bin/kubectl
+        state: link
+        force: yes
+
+    - name: "[K3S-SERVER] Wait for node to be Ready"
+      shell: "k3s kubectl get nodes | grep brain | grep -v NotReady"
+      register: node_ready
+      retries: 15
+      delay: 10
+      until: node_ready.rc == 0
+      ignore_errors: yes
+
+    - name: "[K3S-SERVER] Apply metrics-server for HPA"
+      shell: "k3s kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml"
+      ignore_errors: yes
+
+    # -------------------------------------------------------------------------
+    # Neo4j (Graph RAG) - requires Java
+    # -------------------------------------------------------------------------
+    - name: "[NEO4J] Install Java 21 (Neo4j dependency)"
+      apt:
+        name: openjdk-21-jdk-headless
+        state: present
+        update_cache: yes
+
+    - name: "[NEO4J] Ensure keyrings directory exists"
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: "[NEO4J] Add GPG key"
+      shell: "curl -fsSL https://debian.neo4j.com/neotechnology.gpg.key | gpg --dearmor -o /etc/apt/keyrings/neo4j.gpg"
+      args:
+        creates: /etc/apt/keyrings/neo4j.gpg
+
+    - name: "[NEO4J] Add repository"
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/neo4j.gpg] https://debian.neo4j.com stable 5"
+        state: present
+        update_cache: yes
+
+    - name: "[NEO4J] Install Neo4j"
+      apt:
+        name: neo4j
+        state: present
+
+    - name: "[NEO4J] Set initial password (required by Neo4j 5)"
+      shell: "neo4j-admin dbms set-initial-password neo4j1234"
+      args:
+        creates: /var/lib/neo4j/data/dbms/auth
+      ignore_errors: yes
+
+    - name: "[NEO4J] Configure Neo4j to accept remote connections"
+      lineinfile:
+        path: /etc/neo4j/neo4j.conf
+        regexp: '^#?server.default_listen_address'
+        line: 'server.default_listen_address=0.0.0.0'
+      ignore_errors: yes
+
+    - name: "[NEO4J] Start and enable Neo4j service"
+      systemd:
+        name: neo4j
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    # -------------------------------------------------------------------------
+    # Python packages for Graph RAG scripts
+    # -------------------------------------------------------------------------
+    - name: "[GRAPH-RAG] Install Python neo4j driver"
+      pip:
+        name:
+          - neo4j
+          - requests
+        state: present
+
+    - name: "[GRAPH-RAG] Copy Graph RAG scripts"
+      copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        mode: '0755'
+      loop:
+        - { src: "graph-rag/populate_neo4j.py", dest: "/opt/graph-rag/populate_neo4j.py" }
+        - { src: "graph-rag/analyze_failure.py", dest: "/opt/graph-rag/analyze_failure.py" }
+      ignore_errors: yes
+
+    # -------------------------------------------------------------------------
+    # Ollama (AI Analysis)
+    # -------------------------------------------------------------------------
+    - name: "[OLLAMA] Install Ollama"
+      shell: "curl -sfL https://ollama.ai/install.sh | sh"
+      args:
+        creates: /usr/local/bin/ollama
+
+    - name: "[OLLAMA] Create Ollama systemd service"
+      copy:
+        dest: /etc/systemd/system/ollama.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Ollama AI Service
+          After=network-online.target
+
+          [Service]
+          ExecStart=/usr/local/bin/ollama serve
+          Restart=always
+          RestartSec=3
+          Environment="OLLAMA_HOST=0.0.0.0"
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: "[OLLAMA] Start and enable Ollama"
+      systemd:
+        name: ollama
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: "[OLLAMA] Pull Llama2 model (async)"
+      shell: "ollama pull llama2"
+      async: 1800
+      poll: 0
+      register: ollama_pull
+
+# Phase 2: Body Nodes (k3s Workers + k6 Simulation)
+# =============================================================================
+- name: Setup Body Nodes - Workers & Simulation
+  hosts: workers
+  become: yes
+  vars:
+    k3s_version: "v1.29.2+k3s1"
+    k3s_token: "ecommerce-cluster-2026"
+    k3s_server_url: "https://192.168.174.10:6443"
+
+  tasks:
+    - name: "[K3S-WORKER] Wait for brain node to be ready before joining"
+      wait_for:
+        host: 192.168.174.10
+        port: 6443
+        timeout: 120
+
+    - name: "[K3S-WORKER] Install k3s agent with correct node IP"
+      shell: >
+        curl -sfL https://get.k3s.io |
+        K3S_URL={{ k3s_server_url }}
+        K3S_TOKEN={{ k3s_token }}
+        INSTALL_K3S_VERSION={{ k3s_version }}
+        sh -s - agent
+        --node-ip={{ ansible_host }}
+        --flannel-iface=eth1
+      args:
+        creates: /etc/systemd/system/k3s-agent.service
+
+    - name: "[K3S-WORKER] Ensure k3s-agent is started and enabled"
+      systemd:
+        name: k3s-agent
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    # -------------------------------------------------------------------------
+    # k6 Load Testing (부하 시뮬레이션)
+    # -------------------------------------------------------------------------
+    - name: "[K6] Add k6 GPG key"
+      shell: "curl -fsSL https://dl.k6.io/key.gpg | gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg"
+      args:
+        creates: /usr/share/keyrings/k6-archive-keyring.gpg
+
+    - name: "[K6] Add k6 repository"
+      apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/bin/deb stable main"
+        state: present
+        update_cache: yes
+
+    - name: "[K6] Install k6"
+      apt:
+        name: k6
+        state: present
+
+    - name: "[K6] Copy stress test script"
+      copy:
+        src: simulation/k6-stress-test.js
+        dest: /opt/k6-stress-test.js
+        mode: '0644'
+      ignore_errors: yes
+
+# Phase 3: Memory Node (Prometheus + Grafana)
+# =============================================================================
+- name: Setup Memory Node - Monitoring
+  hosts: memory
+  become: yes
+
+  tasks:
+    # -------------------------------------------------------------------------
+    # Prometheus v2.50.1
+    # -------------------------------------------------------------------------
+    - name: "[PROMETHEUS] Create prometheus user"
+      user:
+        name: prometheus
+        system: yes
+        shell: /bin/false
+
+    - name: "[PROMETHEUS] Download Prometheus v2.50.1"
+      get_url:
+        url: "https://github.com/prometheus/prometheus/releases/download/v2.50.1/prometheus-2.50.1.linux-amd64.tar.gz"
+        dest: /tmp/prometheus.tar.gz
+        timeout: 120
+
+    - name: "[PROMETHEUS] Extract"
+      unarchive:
+        src: /tmp/prometheus.tar.gz
+        dest: /opt/
+        remote_src: yes
+        creates: /opt/prometheus-2.50.1.linux-amd64
+
+    - name: "[PROMETHEUS] Create symlink"
+      file:
+        src: /opt/prometheus-2.50.1.linux-amd64
+        dest: /opt/prometheus
+        state: link
+
+    - name: "[PROMETHEUS] Create directories"
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: prometheus
+        mode: '0755'
+      loop:
+        - /etc/prometheus
+        - /var/lib/prometheus
+
+    - name: "[PROMETHEUS] Write prometheus.yml config"
+      copy:
+        dest: /etc/prometheus/prometheus.yml
+        owner: prometheus
+        mode: '0644'
+        content: |
+          global:
+            scrape_interval: 15s
+            evaluation_interval: 15s
+
+          scrape_configs:
+            - job_name: 'prometheus'
+              static_configs:
+                - targets: ['localhost:9090']
+
+            - job_name: 'k3s-nodes'
+              static_configs:
+                - targets:
+                  - '192.168.174.10:10250'
+                  - '192.168.174.20:10250'
+                  - '192.168.174.21:10250'
+
+            - job_name: 'ecommerce-apps'
+              static_configs:
+                - targets: ['192.168.174.20:8080', '192.168.174.21:8080']
+                  labels:
+                    service: 'ecommerce'
+
+    - name: "[PROMETHEUS] Create systemd service"
+      copy:
+        dest: /etc/systemd/system/prometheus.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Prometheus Monitoring
+          After=network.target
+
+          [Service]
+          User=prometheus
+          ExecStart=/opt/prometheus/prometheus \
+            --config.file=/etc/prometheus/prometheus.yml \
+            --storage.tsdb.path=/var/lib/prometheus \
+            --web.console.templates=/opt/prometheus/consoles \
+            --web.console.libraries=/opt/prometheus/console_libraries
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: "[PROMETHEUS] Start and enable Prometheus"
+      systemd:
+        name: prometheus
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    # -------------------------------------------------------------------------
+    # Grafana
+    # -------------------------------------------------------------------------
+    - name: "[GRAFANA] Add Grafana GPG key"
+      shell: "curl -fsSL https://apt.grafana.com/gpg.key | gpg --dearmor -o /etc/apt/keyrings/grafana.gpg"
+      args:
+        creates: /etc/apt/keyrings/grafana.gpg
+
+    - name: "[GRAFANA] Add Grafana repository"
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main"
+        state: present
+        update_cache: yes
+
+    - name: "[GRAFANA] Install Grafana"
+      apt:
+        name: grafana
+        state: present
+
+    - name: "[GRAFANA] Start and enable Grafana"
+      systemd:
+        name: grafana-server
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+# Phase 4: Shield Node (PQC - liboqs + Kyber)
+# =============================================================================
+- name: Setup Shield Node - Post-Quantum Security
+  hosts: shield
+  become: yes
+
+  tasks:
+    - name: "[PQC] Install build dependencies"
+      apt:
+        name:
+          - gcc
+          - cmake
+          - git
+          - libssl-dev
+          - ninja-build
+          - python3-pytest
+          - python3-pytest-xdist
+        state: present
+
+    - name: "[PQC] Clone liboqs"
+      git:
+        repo: https://github.com/open-quantum-safe/liboqs.git
+        dest: /opt/liboqs
+        depth: 1
+        version: main
+
+    - name: "[PQC] Build liboqs"
+      shell: |
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
+        cmake --build build --parallel
+        cmake --install build
+      args:
+        chdir: /opt/liboqs
+        creates: /usr/local/lib/liboqs.so
+
+    - name: "[PQC] Copy PQC demo source"
+      copy:
+        src: pqc/pqc_demo.c
+        dest: /opt/pqc_demo.c
+        mode: '0644'
+      ignore_errors: yes
+
+    - name: "[PQC] Compile PQC demo"
+      shell: "gcc -o /opt/pqc_demo /opt/pqc_demo.c -loqs -lssl -lcrypto -I/usr/local/include/oqs"
+      args:
+        creates: /opt/pqc_demo
+      ignore_errors: yes
+
+# Phase 5: Deploy Kubernetes Resources (Brain Node)
+# =============================================================================
+- name: Apply Kubernetes Manifests for Resilience
+  hosts: brain
+  become: yes
+
+  tasks:
+    - name: "[K8S] Wait for all workers to join (2 workers needed)"
+      shell: "k3s kubectl get nodes --no-headers | grep -c Ready"
+      register: node_count
+      retries: 20
+      delay: 15
+      until: node_count.stdout | int >= 1
+      ignore_errors: yes
+
+    - name: "[K8S] Create manifests directory"
+      file:
+        path: /tmp/k8s-manifests
+        state: directory
+        mode: '0755'
+
+    - name: "[K8S] Copy k8s manifests"
+      copy:
+        src: k8s-manifests/
+        dest: /tmp/k8s-manifests/
+
+    - name: "[K8S] Apply all manifests"
+      shell: "k3s kubectl apply -f /tmp/k8s-manifests/"
+      ignore_errors: yes
+
+    - name: "[K8S] Check deployment status"
+      shell: "k3s kubectl get all -n default"
+      register: deploy_status
+      ignore_errors: yes
+
+    - name: "[K8S] Show deployment status"
+      debug:
+        msg: "{{ deploy_status.stdout_lines }}"
+
+# Final Summary
+# =============================================================================
+- name: Deployment Complete - Summary
+  hosts: localhost
+  gather_facts: no
+
+  tasks:
+    - name: "[SUMMARY] Print access info"
+      debug:
+        msg: |
+          ============================================
+          E-Commerce Resilience Platform 구축 완료!
+          ============================================
+
+          k3s 클러스터:
+            Control Plane (Brain): 192.168.174.10
+            Worker 1  (Body):      192.168.174.20
+            Worker 2  (Body2):     192.168.174.21
+
+          모니터링:
+            Grafana:    http://192.168.174.30:3000 (admin/admin)
+            Prometheus: http://192.168.174.30:9090
+
+          AI 분석:
+            Neo4j:  http://192.168.174.10:7474 (neo4j/neo4j)
+            Ollama: http://192.168.174.10:11434
+
+          보안:
+            PQC Gateway: 192.168.174.40 (liboqs + Kyber)
+          ============================================

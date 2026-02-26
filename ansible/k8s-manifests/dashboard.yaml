@@ -1,0 +1,855 @@
+---
+# =============================================================================
+# Web Dashboard - ConfigMap (HTML/CSS/JS)
+# FastAPI 백엔드와 통신하는 프리미엄 운영 대시보드
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-html
+  namespace: default
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html lang="ko">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>OpsEngine Dashboard</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+      <style>
+        :root {
+          --bg-primary:   #0b0f1e;
+          --bg-card:      #111827;
+          --bg-card-2:    #1a2235;
+          --accent:       #3b82f6;
+          --accent-2:     #8b5cf6;
+          --green:        #10b981;
+          --red:          #ef4444;
+          --yellow:       #f59e0b;
+          --text-primary: #f1f5f9;
+          --text-muted:   #64748b;
+          --border:       #1e2d45;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+          font-family: 'Inter', sans-serif;
+          background: var(--bg-primary);
+          color: var(--text-primary);
+          min-height: 100vh;
+        }
+
+        /* ── HEADER ── */
+        header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 1rem 2rem;
+          background: linear-gradient(90deg, #0b0f1e 0%, #111827 100%);
+          border-bottom: 1px solid var(--border);
+          position: sticky;
+          top: 0;
+          z-index: 100;
+        }
+        .logo {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          font-size: 1.25rem;
+          font-weight: 700;
+          background: linear-gradient(135deg, var(--accent), var(--accent-2));
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        .logo-icon {
+          width: 36px; height: 36px;
+          background: linear-gradient(135deg, var(--accent), var(--accent-2));
+          border-radius: 10px;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 18px; -webkit-text-fill-color: white;
+        }
+        .header-status {
+          display: flex; align-items: center; gap: 0.5rem;
+          font-size: 0.85rem; color: var(--green);
+        }
+        .status-dot {
+          width: 8px; height: 8px;
+          background: var(--green);
+          border-radius: 50%;
+          animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+
+        /* ── NAV TABS ── */
+        nav {
+          display: flex;
+          gap: 0.25rem;
+          padding: 1rem 2rem 0;
+          border-bottom: 1px solid var(--border);
+          background: var(--bg-card);
+        }
+        .tab {
+          padding: 0.6rem 1.25rem;
+          border-radius: 8px 8px 0 0;
+          cursor: pointer;
+          font-size: 0.875rem;
+          font-weight: 500;
+          color: var(--text-muted);
+          border: none;
+          background: transparent;
+          transition: all 0.2s;
+        }
+        .tab.active { background: var(--bg-primary); color: var(--accent); border-bottom: 2px solid var(--accent); }
+        .tab:hover:not(.active) { color: var(--text-primary); }
+
+        /* ── MAIN ── */
+        main { padding: 2rem; max-width: 1400px; margin: 0 auto; }
+        .page { display: none; }
+        .page.active { display: block; }
+
+        /* ── METRIC CARDS ── */
+        .metric-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 1rem;
+          margin-bottom: 2rem;
+        }
+        .metric-card {
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: 14px;
+          padding: 1.5rem;
+          position: relative;
+          overflow: hidden;
+          transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .metric-card:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(59,130,246,0.1); }
+        .metric-card::before {
+          content: '';
+          position: absolute;
+          top: 0; left: 0; right: 0;
+          height: 2px;
+          background: linear-gradient(90deg, var(--accent), var(--accent-2));
+        }
+        .metric-label { font-size: 0.8rem; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+        .metric-value {
+          font-size: 2rem;
+          font-weight: 700;
+          margin: 0.5rem 0;
+          font-family: 'JetBrains Mono', monospace;
+        }
+        .metric-sub { font-size: 0.8rem; color: var(--green); }
+        .metric-icon {
+          position: absolute;
+          top: 1rem; right: 1rem;
+          font-size: 1.5rem; opacity: 0.3;
+        }
+
+        /* ── SECTION ── */
+        .section { margin-bottom: 2rem; }
+        .section-header {
+          display: flex; align-items: center; justify-content: space-between;
+          margin-bottom: 1rem;
+        }
+        .section-title { font-size: 1rem; font-weight: 600; }
+        .btn {
+          padding: 0.5rem 1.25rem;
+          border-radius: 8px;
+          border: none;
+          cursor: pointer;
+          font-size: 0.875rem;
+          font-weight: 500;
+          transition: all 0.2s;
+        }
+        .btn-primary {
+          background: linear-gradient(135deg, var(--accent), var(--accent-2));
+          color: white;
+        }
+        .btn-primary:hover { opacity: 0.85; transform: translateY(-1px); }
+        .btn-outline {
+          background: transparent;
+          color: var(--accent);
+          border: 1px solid var(--accent);
+        }
+        .btn-outline:hover { background: rgba(59,130,246,0.1); }
+
+        /* ── TABLE ── */
+        .table-wrap {
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: 14px;
+          overflow: hidden;
+        }
+        table { width: 100%; border-collapse: collapse; }
+        th {
+          text-align: left;
+          padding: 0.875rem 1.25rem;
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: var(--text-muted);
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          background: var(--bg-card-2);
+          border-bottom: 1px solid var(--border);
+        }
+        td {
+          padding: 0.875rem 1.25rem;
+          font-size: 0.875rem;
+          border-bottom: 1px solid var(--border);
+        }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: rgba(59,130,246,0.04); }
+
+        /* ── BADGE ── */
+        .badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+          padding: 0.25rem 0.65rem;
+          border-radius: 999px;
+          font-size: 0.75rem;
+          font-weight: 600;
+        }
+        .badge-green { background: rgba(16,185,129,0.15); color: var(--green); }
+        .badge-red   { background: rgba(239,68,68,0.15);  color: var(--red); }
+        .badge-yellow{ background: rgba(245,158,11,0.15); color: var(--yellow); }
+        .badge-blue  { background: rgba(59,130,246,0.15); color: var(--accent); }
+
+        /* ── PRODUCT GRID ── */
+        .product-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+          gap: 1rem;
+        }
+        .product-card {
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: 14px;
+          padding: 1.5rem;
+          transition: all 0.2s;
+          cursor: pointer;
+        }
+        .product-card:hover {
+          border-color: var(--accent);
+          box-shadow: 0 0 0 1px var(--accent);
+          transform: translateY(-2px);
+        }
+        .product-card.selected { border-color: var(--accent-2); box-shadow: 0 0 0 2px var(--accent-2); }
+        .product-name { font-weight: 600; margin-bottom: 0.5rem; }
+        .product-price {
+          font-size: 1.25rem;
+          font-weight: 700;
+          font-family: 'JetBrains Mono';
+          color: var(--accent);
+          margin-bottom: 0.75rem;
+        }
+        .product-stock { font-size: 0.8rem; color: var(--text-muted); }
+        .stock-bar { height: 4px; background: var(--border); border-radius: 2px; margin-top: 0.5rem; }
+        .stock-fill { height: 100%; border-radius: 2px; background: var(--green); transition: width 0.5s; }
+
+        /* ── ORDER FORM ── */
+        .order-panel {
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: 14px;
+          padding: 1.5rem;
+        }
+        .form-row { display: flex; gap: 1rem; align-items: flex-end; margin-top: 1rem; }
+        .form-group { flex: 1; }
+        .form-group label { font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.4rem; }
+        .form-group input {
+          width: 100%;
+          background: var(--bg-primary);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 0.65rem 1rem;
+          color: var(--text-primary);
+          font-size: 0.875rem;
+          font-family: 'Inter';
+        }
+        .form-group input:focus { outline: none; border-color: var(--accent); }
+
+        /* ── NODE STATUS ── */
+        .node-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+          gap: 1rem;
+        }
+        .node-card {
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: 14px;
+          padding: 1.25rem;
+        }
+        .node-name {
+          font-size: 1.1rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+        .node-ip { font-size: 0.75rem; color: var(--text-muted); font-family: 'JetBrains Mono'; margin: 0.25rem 0; }
+        .node-role { font-size: 0.75rem; margin-bottom: 0.75rem; }
+        .service-list { font-size: 0.8rem; }
+        .service-item {
+          display: flex; justify-content: space-between; align-items: center;
+          padding: 0.25rem 0;
+          border-bottom: 1px solid var(--border);
+        }
+        .service-item:last-child { border-bottom: none; }
+
+        /* ── TOAST ── */
+        #toast {
+          position: fixed; bottom: 2rem; right: 2rem;
+          background: var(--bg-card-2);
+          border: 1px solid var(--accent);
+          border-radius: 12px;
+          padding: 1rem 1.5rem;
+          font-size: 0.875rem;
+          max-width: 360px;
+          transform: translateY(100px);
+          opacity: 0;
+          transition: all 0.3s;
+          z-index: 999;
+        }
+        #toast.show { transform: translateY(0); opacity: 1; }
+
+        /* ── LOADING SPINNER ── */
+        .spinner {
+          width: 18px; height: 18px;
+          border: 2px solid var(--border);
+          border-top-color: var(--accent);
+          border-radius: 50%;
+          animation: spin 0.6s linear infinite;
+          display: inline-block; margin-right: 0.5rem; vertical-align: middle;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── API ENDPOINT ── */
+        #api-host-config {
+          background: var(--bg-card-2);
+          border: 1px solid var(--border);
+          border-radius: 10px;
+          padding: 0.75rem 1rem;
+          margin-bottom: 1.5rem;
+          display: flex; gap: 1rem; align-items: center;
+          font-size: 0.8rem;
+        }
+        #api-host-config input {
+          flex: 1;
+          background: var(--bg-primary);
+          border: 1px solid var(--border);
+          border-radius: 6px;
+          padding: 0.4rem 0.75rem;
+          color: var(--text-primary);
+          font-family: 'JetBrains Mono';
+          font-size: 0.8rem;
+        }
+      </style>
+    </head>
+    <body>
+
+    <header>
+      <div class="logo">
+        <div class="logo-icon">⚡</div>
+        OpsEngine
+      </div>
+      <div style="font-size:0.8rem; color:var(--text-muted)">E-Commerce Resilience Platform</div>
+      <div class="header-status">
+        <div class="status-dot"></div>
+        <span id="api-status-text">API 확인 중...</span>
+      </div>
+    </header>
+
+    <nav>
+      <button class="tab active" onclick="showTab('dashboard')">📊 대시보드</button>
+      <button class="tab" onclick="showTab('products')">🛍️ 상품 / 주문</button>
+      <button class="tab" onclick="showTab('history')">📋 주문 내역</button>
+      <button class="tab" onclick="showTab('infra')">🖥️ 인프라 상태</button>
+    </nav>
+
+    <main>
+
+      <!-- API Host Config -->
+      <div id="api-host-config">
+        <span style="color:var(--text-muted);white-space:nowrap">API 주소:</span>
+        <input id="api-host-input" type="text" value="http://192.168.174.20:30080" />
+        <button class="btn btn-outline" onclick="updateApiHost()">적용</button>
+      </div>
+
+      <!-- ════════════════════════════════ DASHBOARD ════════════════════════════════ -->
+      <div id="page-dashboard" class="page active">
+
+        <div class="metric-grid" id="metric-grid">
+          <div class="metric-card">
+            <div class="metric-icon">📦</div>
+            <div class="metric-label">총 주문 수</div>
+            <div class="metric-value" id="m-orders">—</div>
+            <div class="metric-sub">PostgreSQL 저장</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon">💰</div>
+            <div class="metric-label">총 매출</div>
+            <div class="metric-value" id="m-revenue">—</div>
+            <div class="metric-sub">누적 합계</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon">👁️</div>
+            <div class="metric-label">상품 조회수</div>
+            <div class="metric-value" id="m-views">—</div>
+            <div class="metric-sub">Redis 카운터</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon">❤️</div>
+            <div class="metric-label">API 상태</div>
+            <div class="metric-value" id="m-api-status" style="font-size:1.2rem">—</div>
+            <div class="metric-sub" id="m-pg-status">DB 확인 중...</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-header">
+            <div class="section-title">최근 주문</div>
+            <button class="btn btn-outline" onclick="loadHistory(); showTab('history')">전체 보기 →</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>주문 ID</th>
+                  <th>고객</th>
+                  <th>상품</th>
+                  <th>금액</th>
+                  <th>상태</th>
+                  <th>시간</th>
+                </tr>
+              </thead>
+              <tbody id="dashboard-orders"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ════════════════════════════════ PRODUCTS ════════════════════════════════ -->
+      <div id="page-products" class="page">
+
+        <div class="section">
+          <div class="section-header">
+            <div class="section-title">상품 선택</div>
+            <button class="btn btn-outline" onclick="loadProducts()">새로고침</button>
+          </div>
+          <div class="product-grid" id="product-grid">
+            <div style="color:var(--text-muted)">로딩 중...</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="order-panel">
+            <div class="section-title">주문 생성</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>선택된 상품</label>
+                <input id="selected-product-name" readonly placeholder="위에서 상품을 클릭하세요" />
+              </div>
+              <div class="form-group" style="max-width:100px">
+                <label>수량</label>
+                <input id="order-qty" type="number" value="1" min="1" max="10" />
+              </div>
+              <div class="form-group">
+                <label>이메일</label>
+                <input id="order-email" type="email" value="customer@demo.com" />
+              </div>
+              <button class="btn btn-primary" onclick="placeOrder()" style="white-space:nowrap; height:38px">
+                주문하기
+              </button>
+            </div>
+            <div id="order-result" style="margin-top:1rem; display:none"></div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ════════════════════════════════ HISTORY ════════════════════════════════ -->
+      <div id="page-history" class="page">
+        <div class="section">
+          <div class="section-header">
+            <div class="section-title">주문 내역 (PostgreSQL)</div>
+            <button class="btn btn-outline" onclick="loadHistory()">새로고침</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>주문 ID</th>
+                  <th>이메일</th>
+                  <th>상품</th>
+                  <th>수량</th>
+                  <th>금액</th>
+                  <th>상태</th>
+                  <th>시간</th>
+                </tr>
+              </thead>
+              <tbody id="history-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════ INFRA ════════════════════════════════ -->
+      <div id="page-infra" class="page">
+        <div class="section">
+          <div class="section-title" style="margin-bottom:1rem">클러스터 구성</div>
+          <div class="node-grid">
+            <div class="node-card">
+              <div class="node-name" style="color:var(--accent)">🧠 Brain</div>
+              <div class="node-ip">192.168.174.10</div>
+              <div class="node-role"><span class="badge badge-blue">Control Plane</span></div>
+              <div class="service-list">
+                <div class="service-item"><span>k3s</span><span class="badge badge-green">active</span></div>
+                <div class="service-item"><span>Neo4j</span><span class="badge badge-green">active</span></div>
+                <div class="service-item"><span>Ollama</span><span class="badge badge-green">active</span></div>
+              </div>
+            </div>
+            <div class="node-card">
+              <div class="node-name" style="color:var(--green)">💪 Body</div>
+              <div class="node-ip">192.168.174.20</div>
+              <div class="node-role"><span class="badge badge-green">Worker #1</span></div>
+              <div class="service-list">
+                <div class="service-item"><span>k3s-agent</span><span class="badge badge-green">Ready</span></div>
+                <div class="service-item"><span>FastAPI</span><span id="body-api-status" class="badge badge-yellow">확인중</span></div>
+                <div class="service-item"><span>Redis</span><span class="badge badge-green">active</span></div>
+              </div>
+            </div>
+            <div class="node-card">
+              <div class="node-name" style="color:var(--green)">💪 Body2</div>
+              <div class="node-ip">192.168.174.21</div>
+              <div class="node-role"><span class="badge badge-green">Worker #2</span></div>
+              <div class="service-list">
+                <div class="service-item"><span>k3s-agent</span><span class="badge badge-green">Ready</span></div>
+                <div class="service-item"><span>FastAPI</span><span class="badge badge-blue">분산 실행</span></div>
+              </div>
+            </div>
+            <div class="node-card">
+              <div class="node-name" style="color:var(--yellow)">🧠 Memory</div>
+              <div class="node-ip">192.168.174.30</div>
+              <div class="node-role"><span class="badge badge-yellow">Monitoring</span></div>
+              <div class="service-list">
+                <div class="service-item"><span>PostgreSQL 16</span><span id="pg-badge" class="badge badge-yellow">확인중</span></div>
+                <div class="service-item"><span>Prometheus</span><span class="badge badge-green">active</span></div>
+                <div class="service-item"><span>Grafana</span><span class="badge badge-green">active</span></div>
+              </div>
+            </div>
+            <div class="node-card">
+              <div class="node-name" style="color:var(--accent-2)">🛡️ Shield</div>
+              <div class="node-ip">192.168.174.40</div>
+              <div class="node-role"><span class="badge" style="background:rgba(139,92,246,0.15);color:var(--accent-2)">PQC</span></div>
+              <div class="service-list">
+                <div class="service-item"><span>liboqs</span><span class="badge badge-green">installed</span></div>
+                <div class="service-item"><span>Kyber-512</span><span class="badge badge-green">verified</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section" style="margin-top:1.5rem">
+          <div class="section-header">
+            <div class="section-title">외부 링크</div>
+          </div>
+          <div style="display:flex; gap:1rem; flex-wrap:wrap">
+            <a href="http://192.168.174.30:3000" target="_blank" class="btn btn-outline">📈 Grafana</a>
+            <a href="http://192.168.174.30:9090" target="_blank" class="btn btn-outline">🔍 Prometheus</a>
+            <a href="http://192.168.174.10:7474" target="_blank" class="btn btn-outline">🕸️ Neo4j Browser</a>
+            <a href="http://192.168.174.20:30080/docs" target="_blank" class="btn btn-outline">📄 FastAPI Docs</a>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <div id="toast"></div>
+
+    <script>
+      let API_BASE = 'http://192.168.174.20:30080';
+      let selectedProduct = null;
+
+      // ── API 호스트 변경 ──
+      function updateApiHost() {
+        API_BASE = document.getElementById('api-host-input').value.trim();
+        showToast('API 주소 변경: ' + API_BASE);
+        loadDashboard();
+      }
+
+      // ── 탭 전환 ──
+      function showTab(name) {
+        document.querySelectorAll('.tab').forEach((t, i) => {
+          const names = ['dashboard','products','history','infra'];
+          t.classList.toggle('active', names[i] === name);
+        });
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.getElementById('page-' + name).classList.add('active');
+        if (name === 'products') loadProducts();
+        if (name === 'history') loadHistory();
+        if (name === 'dashboard') loadDashboard();
+      }
+
+      // ── 숫자 포맷 ──
+      function fmt(n) {
+        return Number(n).toLocaleString('ko-KR') + '원';
+      }
+
+      // ── Toast ──
+      function showToast(msg) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), 3500);
+      }
+
+      // ── 대시보드 로드 ──
+      async function loadDashboard() {
+        // Health check
+        try {
+          const h = await fetch(API_BASE + '/health', {signal: AbortSignal.timeout(4000)});
+          const hd = await h.json();
+          document.getElementById('api-status-text').textContent = 'API 정상';
+          document.getElementById('m-api-status').textContent = '✅ Healthy';
+          document.getElementById('m-pg-status').textContent = 'PostgreSQL: ' + (hd.postgresql || '?');
+          // PG badge on infra tab
+          const pgBadge = document.getElementById('pg-badge');
+          if (hd.postgresql === 'connected') {
+            pgBadge.textContent = 'connected';
+            pgBadge.className = 'badge badge-green';
+          }
+          const bodyBadge = document.getElementById('body-api-status');
+          bodyBadge.textContent = 'Running';
+          bodyBadge.className = 'badge badge-green';
+        } catch(e) {
+          document.getElementById('api-status-text').textContent = 'API 연결 실패';
+          document.getElementById('m-api-status').textContent = '❌ Offline';
+          document.getElementById('m-pg-status').textContent = 'API에 연결할 수 없습니다';
+        }
+
+        // Metrics
+        try {
+          const m = await fetch(API_BASE + '/metrics/summary', {signal: AbortSignal.timeout(4000)});
+          const md = await m.json();
+          document.getElementById('m-orders').textContent = md.total_orders_db ?? '—';
+          document.getElementById('m-revenue').textContent = md.total_revenue ? fmt(md.total_revenue) : '—';
+          document.getElementById('m-views').textContent = md.redis_product_views ?? '—';
+        } catch(e) {}
+
+        // Recent orders
+        try {
+          const o = await fetch(API_BASE + '/orders/history?limit=5', {signal: AbortSignal.timeout(4000)});
+          const od = await o.json();
+          const tbody = document.getElementById('dashboard-orders');
+          tbody.innerHTML = '';
+          if (!od.orders || !od.orders.length) {
+            tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-muted);text-align:center;padding:2rem">아직 주문이 없습니다. 상품 탭에서 주문해 보세요!</td></tr>';
+            return;
+          }
+          od.orders.forEach(o => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td style="font-family:'JetBrains Mono';font-size:0.75rem;color:var(--text-muted)">${o.id.substring(0,8)}...</td>
+              <td>${o.email}</td>
+              <td>${o.product}</td>
+              <td style="font-family:'JetBrains Mono'">${fmt(o.total_price)}</td>
+              <td><span class="badge badge-green">${o.status}</span></td>
+              <td style="color:var(--text-muted)">${o.created_at.substring(0,16)}</td>
+            `;
+            tbody.appendChild(tr);
+          });
+        } catch(e) {}
+      }
+
+      // ── 상품 로드 ──
+      async function loadProducts() {
+        const grid = document.getElementById('product-grid');
+        grid.innerHTML = '<div style="color:var(--text-muted)"><span class="spinner"></span> 로딩 중...</div>';
+        try {
+          const r = await fetch(API_BASE + '/products', {signal: AbortSignal.timeout(5000)});
+          const d = await r.json();
+          grid.innerHTML = '';
+          d.products.forEach(p => {
+            const stockPct = Math.min(100, Math.round((p.stock / 300) * 100));
+            const card = document.createElement('div');
+            card.className = 'product-card';
+            card.id = 'prod-' + p.id;
+            card.innerHTML = `
+              <div class="product-name">${p.name}</div>
+              <div class="product-price">${fmt(p.price)}</div>
+              <div class="product-stock">재고: ${p.stock}개</div>
+              <div class="stock-bar"><div class="stock-fill" style="width:${stockPct}%;background:${p.stock < 30 ? 'var(--red)' : 'var(--green)'}"></div></div>
+            `;
+            card.onclick = () => selectProduct(p);
+            grid.appendChild(card);
+          });
+        } catch(e) {
+          grid.innerHTML = '<div style="color:var(--red)">API 연결 실패: ' + e.message + '</div>';
+        }
+      }
+
+      function selectProduct(p) {
+        selectedProduct = p;
+        document.querySelectorAll('.product-card').forEach(c => c.classList.remove('selected'));
+        document.getElementById('prod-' + p.id).classList.add('selected');
+        document.getElementById('selected-product-name').value = p.name + ' (' + fmt(p.price) + ')';
+      }
+
+      // ── 주문 ──
+      async function placeOrder() {
+        if (!selectedProduct) { showToast('⚠️ 상품을 먼저 선택하세요'); return; }
+        const qty   = parseInt(document.getElementById('order-qty').value) || 1;
+        const email = document.getElementById('order-email').value || 'guest@demo.com';
+        const resultEl = document.getElementById('order-result');
+        resultEl.style.display = 'block';
+        resultEl.innerHTML = '<span class="spinner"></span> 주문 처리 중...';
+        try {
+          const r = await fetch(API_BASE + '/orders', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({product_id: selectedProduct.id, quantity: qty, customer_email: email}),
+            signal: AbortSignal.timeout(8000)
+          });
+          const d = await r.json();
+          if (r.ok) {
+            resultEl.innerHTML = `
+              <div class="table-wrap" style="padding:1rem">
+                <div style="display:flex;gap:2rem;flex-wrap:wrap">
+                  <div><div class="metric-label">주문 ID</div><div style="font-family:'JetBrains Mono';font-size:0.8rem;margin-top:0.25rem">${d.order_id}</div></div>
+                  <div><div class="metric-label">상품</div><div style="margin-top:0.25rem">${d.product}</div></div>
+                  <div><div class="metric-label">수량</div><div style="margin-top:0.25rem">${d.quantity}개</div></div>
+                  <div><div class="metric-label">금액</div><div style="font-family:'JetBrains Mono';color:var(--accent);margin-top:0.25rem">${fmt(d.total_price)}</div></div>
+                  <div><div class="metric-label">상태</div><div style="margin-top:0.25rem"><span class="badge badge-green">${d.status}</span></div></div>
+                  <div><div class="metric-label">저장소</div><div style="margin-top:0.25rem"><span class="badge badge-blue">${d.source}</span></div></div>
+                </div>
+              </div>
+            `;
+            showToast('✅ 주문 완료! PostgreSQL + Neo4j 기록됨');
+            loadProducts();
+          } else {
+            resultEl.innerHTML = '<div style="color:var(--red)">❌ ' + (d.detail || JSON.stringify(d)) + '</div>';
+          }
+        } catch(e) {
+          resultEl.innerHTML = '<div style="color:var(--red)">❌ 오류: ' + e.message + '</div>';
+        }
+      }
+
+      // ── 주문 내역 ──
+      async function loadHistory() {
+        const tbody = document.getElementById('history-tbody');
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center"><span class="spinner"></span> 로딩 중...</td></tr>';
+        try {
+          const r = await fetch(API_BASE + '/orders/history?limit=30', {signal: AbortSignal.timeout(5000)});
+          const d = await r.json();
+          tbody.innerHTML = '';
+          if (!d.orders || !d.orders.length) {
+            tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-muted);text-align:center;padding:2rem">주문 내역이 없습니다.</td></tr>';
+            return;
+          }
+          d.orders.forEach(o => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td style="font-family:'JetBrains Mono';font-size:0.75rem;color:var(--text-muted)">${o.id.substring(0,8)}...</td>
+              <td>${o.email}</td>
+              <td>${o.product}</td>
+              <td>${o.quantity}</td>
+              <td style="font-family:'JetBrains Mono'">${fmt(o.total_price)}</td>
+              <td><span class="badge badge-green">${o.status}</span></td>
+              <td style="color:var(--text-muted);font-size:0.8rem">${o.created_at.substring(0,16)}</td>
+            `;
+            tbody.appendChild(tr);
+          });
+        } catch(e) {
+          tbody.innerHTML = '<tr><td colspan="7" style="color:var(--red);text-align:center">API 연결 실패: ' + e.message + '</td></tr>';
+        }
+      }
+
+      // ── 초기화 ──
+      loadDashboard();
+      setInterval(loadDashboard, 30000); // 30초마다 자동 갱신
+    </script>
+    </body>
+    </html>
+
+  nginx.conf: |
+    server {
+        listen 80;
+        server_name _;
+
+        location / {
+            root /usr/share/nginx/html;
+            index index.html;
+            try_files $uri /index.html;
+        }
+
+        location /api/ {
+            proxy_pass http://ecommerce-api-service/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+    }
+---
+# =============================================================================
+# Web Dashboard - Deployment
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-dashboard
+  namespace: default
+  labels:
+    app: web-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web-dashboard
+  template:
+    metadata:
+      labels:
+        app: web-dashboard
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html/index.html
+              subPath: index.html
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+      volumes:
+        - name: html
+          configMap:
+            name: dashboard-html
+---
+# =============================================================================
+# Web Dashboard - NodePort Service
+# http://192.168.174.20:30081 에서 접속
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-dashboard-service
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    app: web-dashboard
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30081

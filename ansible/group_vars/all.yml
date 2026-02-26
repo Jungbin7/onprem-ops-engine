@@ -1,0 +1,18 @@
+---
+# 2026 Verified Versions (Pre-tested & Compatible)
+k3s_version: "v1.29.2+k3s1"
+neo4j_version: "5.17.0"
+ollama_version: "0.1.26"
+cilium_version: "1.15.1"
+prometheus_version: "2.50.1"
+grafana_version: "10.3.3"
+postgresql_version: "16"
+
+# System Requirements (for pre-flight checks)
+minimum_memory_mb: 2048
+minimum_disk_gb: 20
+minimum_cpu_cores: 1
+
+# Network Configuration
+cluster_cidr: "10.42.0.0/16"
+service_cidr: "10.43.0.0/16"

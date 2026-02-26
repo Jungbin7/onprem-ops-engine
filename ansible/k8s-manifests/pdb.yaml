@@ -1,0 +1,29 @@
+---
+# =============================================================================
+# PDB (PodDisruptionBudget)
+# 최소 1개 파드 유지 보장 → Worker 노드 장애 시에도 서비스 continuity
+# =============================================================================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ecommerce-api-pdb
+  namespace: default
+spec:
+  minAvailable: 1            # 최소 1개 파드는 항상 실행 상태 유지
+  selector:
+    matchLabels:
+      app: ecommerce-api
+---
+# =============================================================================
+# Redis PDB
+# =============================================================================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-pdb
+  namespace: default
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: redis

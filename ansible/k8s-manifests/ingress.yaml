@@ -1,0 +1,36 @@
+---
+# =============================================================================
+# Ingress - 트래픽 진입점
+# k3s에는 기본 Traefik이 있으나 --disable traefik으로 비활성화했으므로
+# nginx-ingress를 사용하거나 NodePort로 대체
+# 현재는 NodePort(30080)으로 직접 접근 가능
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ecommerce-ingress
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: ecommerce.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ecommerce-api-service
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: ecommerce-api-service
+                port:
+                  number: 80

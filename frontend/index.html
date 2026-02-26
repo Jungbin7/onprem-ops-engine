@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpsEngine Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    OpsEngine
+  </div>
+  <div class="header-center">E-Commerce Resilience Platform · k3s on-premise</div>
+  <div class="header-status">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="api-status-text">연결 중...</span>
+  </div>
+</header>
+
+<nav>
+  <button class="tab active" onclick="showTab('dashboard')">📊 대시보드</button>
+  <button class="tab" onclick="showTab('products')">🛍️ 상품 / 주문</button>
+  <button class="tab" onclick="showTab('history')">📋 주문 내역</button>
+  <button class="tab" onclick="showTab('infra')">🖥️ 인프라</button>
+</nav>
+
+<main>
+  <!-- API 주소 설정 -->
+  <div class="api-config">
+    <span class="config-label">API 주소</span>
+    <input id="api-host-input" type="text" value="http://192.168.174.20:30080" />
+    <button class="btn btn-outline" onclick="updateApiHost()">적용</button>
+    <a href="#" id="swagger-link" onclick="openSwagger()" class="btn btn-outline">📄 Swagger UI</a>
+  </div>
+
+  <!-- ══════════════ DASHBOARD ══════════════ -->
+  <div id="page-dashboard" class="page active">
+    <div class="metric-grid">
+      <div class="metric-card">
+        <div class="metric-icon">📦</div>
+        <div class="metric-label">총 주문 수</div>
+        <div class="metric-value" id="m-orders">—</div>
+        <div class="metric-sub">PostgreSQL 저장</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon">💰</div>
+        <div class="metric-label">총 매출</div>
+        <div class="metric-value" id="m-revenue" style="font-size:1.4rem">—</div>
+        <div class="metric-sub">누적 합계</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon">👁️</div>
+        <div class="metric-label">상품 조회수</div>
+        <div class="metric-value" id="m-views">—</div>
+        <div class="metric-sub">Redis 카운터</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon">🗄️</div>
+        <div class="metric-label">PostgreSQL</div>
+        <div class="metric-value" id="m-pg" style="font-size:1.1rem">—</div>
+        <div class="metric-sub" id="m-redis-status">Redis 확인 중...</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">최근 주문 (실시간)</div>
+        <div style="display:flex;gap:0.5rem">
+          <span id="auto-refresh-badge" class="badge badge-green">● 30s 자동갱신</span>
+          <button class="btn btn-outline" onclick="loadDashboard()">새로고침</button>
+          <button class="btn btn-outline" onclick="showTab('history')">전체보기 →</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>주문 ID</th><th>고객</th><th>상품</th><th>금액</th><th>상태</th><th>시간</th></tr></thead>
+          <tbody id="dashboard-orders"><tr><td colspan="6" class="empty-cell">로딩 중...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ PRODUCTS ══════════════ -->
+  <div id="page-products" class="page">
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">상품 목록</div>
+        <button class="btn btn-outline" onclick="loadProducts()">새로고침</button>
+      </div>
+      <div class="product-grid" id="product-grid">
+        <div class="empty-cell">로딩 중...</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="order-panel">
+        <div class="section-title" style="margin-bottom:1rem">주문 생성</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>선택 상품</label>
+            <input id="sel-product" readonly placeholder="⬆ 위에서 상품을 클릭하세요">
+          </div>
+          <div class="form-group" style="max-width:90px">
+            <label>수량</label>
+            <input id="order-qty" type="number" value="1" min="1" max="99">
+          </div>
+          <div class="form-group">
+            <label>이메일</label>
+            <input id="order-email" type="email" value="customer@demo.com">
+          </div>
+          <button class="btn btn-primary" onclick="placeOrder()">주문하기 →</button>
+        </div>
+        <div id="order-result" class="order-result" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ HISTORY ══════════════ -->
+  <div id="page-history" class="page">
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">주문 내역 (PostgreSQL 16)</div>
+        <button class="btn btn-outline" onclick="loadHistory()">새로고침</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>주문 ID</th><th>이메일</th><th>상품</th><th>수량</th><th>금액</th><th>상태</th><th>시간</th></tr></thead>
+          <tbody id="history-tbody"><tr><td colspan="7" class="empty-cell">로딩 중...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ INFRA ══════════════ -->
+  <div id="page-infra" class="page">
+    <div class="section">
+      <div class="section-title" style="margin-bottom:1rem">클러스터 구성 (5대 VM)</div>
+      <div class="node-grid">
+        <div class="node-card">
+          <div class="node-name" style="color:var(--accent)">🧠 Brain</div>
+          <div class="node-ip">192.168.174.10</div>
+          <div style="margin:0.4rem 0"><span class="badge badge-blue">k3s Control Plane</span></div>
+          <div class="svc-list">
+            <div class="svc-item"><span>k3s server</span><span class="badge badge-green">active</span></div>
+            <div class="svc-item"><span>Neo4j 5.17</span><span class="badge badge-green">active</span></div>
+            <div class="svc-item"><span>Ollama llama2</span><span class="badge badge-green">active</span></div>
+          </div>
+        </div>
+        <div class="node-card">
+          <div class="node-name" style="color:var(--green)">💪 Body</div>
+          <div class="node-ip">192.168.174.20</div>
+          <div style="margin:0.4rem 0"><span class="badge badge-green">k3s Worker #1</span></div>
+          <div class="svc-list">
+            <div class="svc-item"><span>k3s-agent</span><span class="badge badge-green">Ready</span></div>
+            <div class="svc-item"><span>FastAPI Pod</span><span id="body-api" class="badge badge-yellow">확인중</span></div>
+            <div class="svc-item"><span>Redis Pod</span><span class="badge badge-green">Running</span></div>
+          </div>
+        </div>
+        <div class="node-card">
+          <div class="node-name" style="color:var(--green)">💪 Body2</div>
+          <div class="node-ip">192.168.174.21</div>
+          <div style="margin:0.4rem 0"><span class="badge badge-green">k3s Worker #2</span></div>
+          <div class="svc-list">
+            <div class="svc-item"><span>k3s-agent</span><span class="badge badge-green">Ready</span></div>
+            <div class="svc-item"><span>FastAPI Pod</span><span class="badge badge-blue">분산 배포</span></div>
+          </div>
+        </div>
+        <div class="node-card">
+          <div class="node-name" style="color:var(--yellow)">🔍 Memory</div>
+          <div class="node-ip">192.168.174.30</div>
+          <div style="margin:0.4rem 0"><span class="badge badge-yellow">Monitoring</span></div>
+          <div class="svc-list">
+            <div class="svc-item"><span>PostgreSQL 16</span><span id="pg-badge" class="badge badge-yellow">확인중</span></div>
+            <div class="svc-item"><span>pgvector 0.8.1</span><span class="badge badge-green">installed</span></div>
+            <div class="svc-item"><span>Prometheus</span><span class="badge badge-green">active</span></div>
+            <div class="svc-item"><span>Grafana</span><span class="badge badge-green">active</span></div>
+          </div>
+        </div>
+        <div class="node-card">
+          <div class="node-name" style="color:var(--purple)">🛡️ Shield</div>
+          <div class="node-ip">192.168.174.40</div>
+          <div style="margin:0.4rem 0"><span class="badge badge-purple">PQC Gateway</span></div>
+          <div class="svc-list">
+            <div class="svc-item"><span>liboqs</span><span class="badge badge-green">installed</span></div>
+            <div class="svc-item"><span>Kyber-512</span><span class="badge badge-green">✓ verified</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" style="margin-top:1.5rem">
+      <div class="section-title" style="margin-bottom:1rem">외부 링크</div>
+      <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
+        <a href="http://192.168.174.30:3000" target="_blank" class="btn btn-outline">📈 Grafana</a>
+        <a href="http://192.168.174.30:9090" target="_blank" class="btn btn-outline">🔍 Prometheus</a>
+        <a href="http://192.168.174.10:7474" target="_blank" class="btn btn-outline">🕸️ Neo4j Browser</a>
+        <a href="http://192.168.174.20:30080/docs" target="_blank" class="btn btn-outline">📄 FastAPI Swagger</a>
+        <a href="http://192.168.174.20:30081" target="_blank" class="btn btn-outline">🌐 k8s 대시보드</a>
+      </div>
+    </div>
+
+    <div class="section" style="margin-top:1.5rem">
+      <div class="section-title" style="margin-bottom:1rem">데이터 흐름</div>
+      <div class="flow-diagram">
+        <div class="flow-node flow-blue">Browser<br><small>이 파일</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node flow-green">FastAPI<br><small>:30080</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node flow-yellow">PostgreSQL<br><small>주문 저장</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node flow-purple">Neo4j<br><small>관계 기록</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node flow-red">Ollama<br><small>AI 분석</small></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

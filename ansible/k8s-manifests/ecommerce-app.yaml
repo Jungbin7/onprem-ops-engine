@@ -1,0 +1,407 @@
+---
+# =============================================================================
+# FastAPI E-Commerce App - ConfigMap (실제 e2e 비즈니스 로직)
+# PostgreSQL 16 + pgvector + Redis + Neo4j + Ollama 연동
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fastapi-app-code
+  namespace: default
+data:
+  main.py: |
+    from fastapi import FastAPI, HTTPException, BackgroundTasks
+    from fastapi.middleware.cors import CORSMiddleware
+    from pydantic import BaseModel
+    from typing import Optional
+    import psycopg2, psycopg2.extras
+    import redis, os, time, uuid, random, logging, httpx
+
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
+    app = FastAPI(
+        title="E-Commerce Resilience Platform",
+        version="2.0.0",
+        description="PostgreSQL + Redis + Neo4j + Ollama 연동 실제 이커머스 API"
+    )
+
+    app.add_middleware(CORSMiddleware, allow_origins=["*"],
+                       allow_methods=["*"], allow_headers=["*"])
+
+    # ── DB 연결 ──────────────────────────────────────────────────
+    PG_HOST = os.getenv("PG_HOST", "192.168.174.30")
+    PG_PORT = os.getenv("PG_PORT", "5432")
+    PG_DB   = os.getenv("PG_DB",   "ecommerce")
+    PG_USER = os.getenv("PG_USER", "ecommerce")
+    PG_PASS = os.getenv("PG_PASS", "ecommerce2026")
+
+    NEO4J_HOST   = os.getenv("NEO4J_HOST",   "192.168.174.10")
+    OLLAMA_HOST  = os.getenv("OLLAMA_HOST",  "192.168.174.10")
+
+    def get_pg():
+        return psycopg2.connect(
+            host=PG_HOST, port=PG_PORT, dbname=PG_DB,
+            user=PG_USER, password=PG_PASS,
+            connect_timeout=3
+        )
+
+    def get_redis():
+        try:
+            r = redis.Redis(host=os.getenv("REDIS_HOST","redis-service"),
+                            port=6379, decode_responses=True,
+                            socket_connect_timeout=2)
+            r.ping()
+            return r
+        except Exception:
+            return None
+
+    # ── 요청 모델 ─────────────────────────────────────────────────
+    class OrderRequest(BaseModel):
+        product_id: int
+        quantity: int = 1
+        customer_email: Optional[str] = "guest@example.com"
+
+    # ── 헬스체크 ─────────────────────────────────────────────────
+    @app.get("/")
+    def root():
+        return {
+            "service": "E-Commerce API",
+            "version": "2.0.0",
+            "endpoints": {
+                "products":  "GET  /products",
+                "order":     "POST /orders",
+                "history":   "GET  /orders/history",
+                "metrics":   "GET  /metrics/summary",
+                "stress":    "GET  /stress",
+                "health":    "GET  /health",
+                "analyze":   "GET  /analyze/failures",
+            }
+        }
+
+    @app.get("/health")
+    def health():
+        status = {"api": "healthy", "timestamp": time.time()}
+        # PostgreSQL 체크
+        try:
+            conn = get_pg()
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            conn.close()
+            status["postgresql"] = "connected"
+        except Exception as e:
+            status["postgresql"] = f"error: {str(e)[:60]}"
+        # Redis 체크
+        r = get_redis()
+        status["redis"] = "connected" if r else "unavailable"
+        return status
+
+    # ── 상품 목록 (PostgreSQL 조회) ────────────────────────────────
+    @app.get("/products")
+    def list_products():
+        try:
+            conn = get_pg()
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT id, name, price, stock FROM products ORDER BY id")
+            products = [dict(row) for row in cur.fetchall()]
+            conn.close()
+
+            r = get_redis()
+            views = r.incr("product_views") if r else "N/A"
+            return {"products": products, "total_views": views,
+                    "source": "postgresql"}
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"DB 오류: {str(e)}")
+
+    # ── 주문 생성 (PostgreSQL 저장 + Neo4j 관계 기록) ──────────────
+    @app.post("/orders")
+    def create_order(req: OrderRequest, background_tasks: BackgroundTasks):
+        try:
+            conn = get_pg()
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            # 상품 조회 및 재고 확인
+            cur.execute("SELECT * FROM products WHERE id = %s FOR UPDATE", (req.product_id,))
+            product = cur.fetchone()
+            if not product:
+                conn.close()
+                raise HTTPException(status_code=404, detail="상품을 찾을 수 없습니다")
+            if product["stock"] < req.quantity:
+                conn.close()
+                raise HTTPException(status_code=400, detail="재고가 부족합니다")
+
+            # 고객 조회/생성
+            cur.execute("SELECT id FROM customers WHERE email = %s", (req.customer_email,))
+            customer = cur.fetchone()
+            if not customer:
+                cur.execute(
+                    "INSERT INTO customers (name, email) VALUES (%s, %s) RETURNING id",
+                    (req.customer_email.split("@")[0], req.customer_email)
+                )
+                customer = cur.fetchone()
+
+            # 주문 생성
+            total = product["price"] * req.quantity
+            cur.execute(
+                """INSERT INTO orders (customer_id, product_id, quantity, total_price, status)
+                   VALUES (%s, %s, %s, %s, 'confirmed') RETURNING id""",
+                (customer["id"], req.product_id, req.quantity, total)
+            )
+            order = cur.fetchone()
+            order_id = str(order["id"])
+
+            # 결제 레코드 생성
+            cur.execute(
+                """INSERT INTO payments (order_id, amount, status)
+                   VALUES (%s, %s, 'completed') RETURNING id""",
+                (order_id, total)
+            )
+
+            # 재고 감소
+            cur.execute(
+                "UPDATE products SET stock = stock - %s WHERE id = %s",
+                (req.quantity, req.product_id)
+            )
+
+            conn.commit()
+            conn.close()
+
+            # Redis 카운터
+            r = get_redis()
+            if r:
+                r.incr("order_count")
+
+            # Neo4j 관계 기록 (백그라운드)
+            background_tasks.add_task(record_neo4j_relation,
+                str(customer["id"]), order_id,
+                req.product_id, str(product["name"]), total
+            )
+
+            # 처리 지연 시뮬레이션
+            time.sleep(random.uniform(0.01, 0.05))
+
+            return {
+                "order_id":    order_id,
+                "product":     product["name"],
+                "quantity":    req.quantity,
+                "total_price": total,
+                "status":      "confirmed",
+                "source":      "postgresql"
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"주문 처리 오류: {str(e)}")
+
+    # ── 주문 내역 조회 ─────────────────────────────────────────────
+    @app.get("/orders/history")
+    def order_history(limit: int = 20):
+        try:
+            conn = get_pg()
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT o.id, c.email, p.name as product, o.quantity,
+                       o.total_price, o.status, o.created_at
+                FROM orders o
+                JOIN customers c ON o.customer_id = c.id
+                JOIN products p ON o.product_id = p.id
+                ORDER BY o.created_at DESC LIMIT %s
+            """, (limit,))
+            orders = [dict(row) for row in cur.fetchall()]
+            conn.close()
+            # UUID를 문자열로 변환
+            for o in orders:
+                o["id"] = str(o["id"])
+                o["created_at"] = str(o["created_at"])
+            return {"orders": orders, "count": len(orders)}
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"DB 오류: {str(e)}")
+
+    # ── 메트릭 요약 ───────────────────────────────────────────────
+    @app.get("/metrics/summary")
+    def metrics_summary():
+        data = {}
+        try:
+            conn = get_pg()
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM orders")
+            data["total_orders_db"] = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM orders WHERE status='confirmed'")
+            data["confirmed_orders"] = cur.fetchone()[0]
+            cur.execute("SELECT COALESCE(SUM(total_price),0) FROM orders")
+            data["total_revenue"] = cur.fetchone()[0]
+            conn.close()
+        except Exception as e:
+            data["db_error"] = str(e)[:60]
+
+        r = get_redis()
+        data["redis_order_count"]   = r.get("order_count")   if r else "N/A"
+        data["redis_product_views"] = r.get("product_views") if r else "N/A"
+        return data
+
+    # ── 부하 테스트용 엔드포인트 ──────────────────────────────────
+    @app.get("/stress")
+    def stress_endpoint():
+        result = sum(i * i for i in range(50000))
+        return {"computed": result, "status": "ok"}
+
+    # ── Ollama AI 장애 분석 ────────────────────────────────────────
+    @app.get("/analyze/failures")
+    def analyze_failures():
+        try:
+            conn = get_pg()
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT p.name, COUNT(o.id) as order_count,
+                       SUM(o.total_price) as revenue, p.stock
+                FROM orders o JOIN products p ON o.product_id = p.id
+                GROUP BY p.id, p.name, p.stock ORDER BY order_count DESC LIMIT 5
+            """)
+            top_products = [dict(r) for r in cur.fetchall()]
+            conn.close()
+
+            prompt = "이커머스 플랫폼 주문 현황:\n" + str(top_products) + "\n\n재고 부족 위험이나 판매 패턴 이상을 간단히 설명해 주세요."
+            ollama_url = "http://" + OLLAMA_HOST + ":11434/api/generate"
+            resp = httpx.post(
+                ollama_url,
+                json={"model": "llama2", "prompt": prompt, "stream": False},
+                timeout=30.0
+            )
+            analysis = resp.json().get("response", "분석 응답 없음")
+            return {
+                "top_products": top_products,
+                "ai_analysis":  analysis[:500],
+                "model":        "llama2"
+            }
+        except Exception as e:
+            return {"error": str(e)[:200], "hint": "Ollama 또는 DB 연결 확인 필요"}
+
+    # ── Neo4j 관계 기록 (백그라운드 태스크) ──────────────────────
+    def record_neo4j_relation(customer_id, order_id, product_id, product_name, amount):
+        try:
+            import httpx as hx
+            # Neo4j HTTP API로 Cypher 실행
+            cypher = (
+                "MERGE (c:Customer {id: '" + customer_id + "'}) "
+                "MERGE (p:Product {id: " + str(product_id) + ", name: '" + product_name + "'}) "
+                "MERGE (o:Order {id: '" + order_id + "', amount: " + str(amount) + "}) "
+                "MERGE (c)-[:PLACED]->(o) "
+                "MERGE (o)-[:CONTAINS]->(p)"
+            )
+            neo4j_url = "http://" + NEO4J_HOST + ":7474/db/neo4j/tx/commit"
+            hx.post(
+                neo4j_url,
+                json={"statements": [{"statement": cypher}]},
+                auth=("neo4j", "neo4j1234"),
+                timeout=5.0
+            )
+        except Exception as e:
+            logger.warning("Neo4j 기록 실패 (non-critical): " + str(e))
+
+    if __name__ == "__main__":
+        import uvicorn
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+
+  requirements.txt: |
+    fastapi==0.109.2
+    uvicorn==0.27.1
+    redis==5.0.1
+    psycopg2-binary==2.9.9
+    httpx==0.26.0
+    pydantic==2.5.3
+---
+# =============================================================================
+# FastAPI App - Deployment
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecommerce-api
+  namespace: default
+  labels:
+    app: ecommerce-api
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ecommerce-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: ecommerce-api
+        tier: backend
+    spec:
+      initContainers:
+        - name: install-deps
+          image: python:3.11-slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - pip install fastapi==0.109.2 uvicorn==0.27.1 redis==5.0.1 psycopg2-binary==2.9.9 httpx==0.26.0 pydantic==2.5.3 --target=/app/deps --quiet
+          volumeMounts:
+            - name: deps
+              mountPath: /app/deps
+      containers:
+        - name: fastapi
+          image: python:3.11-slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - PYTHONPATH=/app/deps python /app/code/main.py
+          env:
+            - name: REDIS_HOST
+              value: "redis-service"
+            - name: PG_HOST
+              value: "192.168.174.30"
+            - name: PG_PORT
+              value: "5432"
+            - name: PG_DB
+              value: "ecommerce"
+            - name: PG_USER
+              value: "ecommerce"
+            - name: PG_PASS
+              value: "ecommerce2026"
+            - name: NEO4J_HOST
+              value: "192.168.174.10"
+            - name: OLLAMA_HOST
+              value: "192.168.174.10"
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: app-code
+              mountPath: /app/code
+            - name: deps
+              mountPath: /app/deps
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 90
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+      volumes:
+        - name: app-code
+          configMap:
+            name: fastapi-app-code
+            items:
+              - key: main.py
+                path: main.py
+        - name: deps
+          emptyDir: {}

@@ -1,0 +1,44 @@
+---
+# =============================================================================
+# HPA (Horizontal Pod Autoscaler)
+# CPU 70% 초과 시 자동 스케일 아웃 (최대 6개 파드)
+# k6 부하 테스트 시 HPA 반응 확인용
+# =============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ecommerce-api-hpa
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ecommerce-api
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30     # 30초 이상 부하 지속 시 스케일 아웃
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 30              # 30초마다 최대 2개씩 추가
+    scaleDown:
+      stabilizationWindowSeconds: 120   # 2분 안정화 후 스케일 인
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60              # 60초마다 최대 1개씩 제거

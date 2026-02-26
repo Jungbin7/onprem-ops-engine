@@ -1,0 +1,38 @@
+all:
+  children:
+    brain:
+      hosts:
+        brain-node:
+          ansible_host: 192.168.174.10
+          ansible_user: vagrant
+          ansible_ssh_private_key_file: ~/.vagrant-keys/brain_key
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes'
+
+    workers:
+      hosts:
+        body-node:
+          ansible_host: 192.168.174.20
+          ansible_user: vagrant
+          ansible_ssh_private_key_file: ~/.vagrant-keys/body_key
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes'
+        body2-node:
+          ansible_host: 192.168.174.21
+          ansible_user: vagrant
+          ansible_ssh_private_key_file: ~/.vagrant-keys/body2_key
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes'
+
+    memory:
+      hosts:
+        memory-node:
+          ansible_host: 192.168.174.30
+          ansible_user: vagrant
+          ansible_ssh_private_key_file: ~/.vagrant-keys/memory_key
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes'
+
+    shield:
+      hosts:
+        shield-node:
+          ansible_host: 192.168.174.40
+          ansible_user: vagrant
+          ansible_ssh_private_key_file: ~/.vagrant-keys/shield_key
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes'

@@ -1,0 +1,44 @@
+---
+# =============================================================================
+# FastAPI App - ClusterIP Service
+# 클러스터 내부 통신용 서비스
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-api-service
+  namespace: default
+  labels:
+    app: ecommerce-api
+spec:
+  type: ClusterIP
+  selector:
+    app: ecommerce-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP
+---
+# =============================================================================
+# FastAPI App - NodePort Service
+# 외부 직접 접근용 (Ingress 없이도 테스트 가능)
+# http://192.168.174.20:30080 또는 http://192.168.174.21:30080
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-api-nodeport
+  namespace: default
+  labels:
+    app: ecommerce-api
+spec:
+  type: NodePort
+  selector:
+    app: ecommerce-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      nodePort: 30080
+      protocol: TCP
